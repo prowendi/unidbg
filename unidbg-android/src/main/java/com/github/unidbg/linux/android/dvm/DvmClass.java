@@ -301,6 +301,14 @@ public class DvmClass extends DvmObject<Class<?>> {
         }
     }
 
+    public float callStaticJniMethodFloat(Emulator<?> emulator, String method, Object...args) {
+        try {
+            return callJniMethod(emulator, vm, this, this, method, args).floatValue();
+        } finally {
+            vm.deleteLocalRefs();
+        }
+    }
+
     @SuppressWarnings("unused")
     public long callStaticJniMethodLong(Emulator<?> emulator, String method, Object...args) {
         try {
@@ -347,4 +355,12 @@ public class DvmClass extends DvmObject<Class<?>> {
         return jni;
     }
 
+    public void setMethodId(int methodID, DvmMethod dvmMethod) {
+        if (!staticMethodMap.containsKey(methodID)) {
+            staticMethodMap.put(methodID, dvmMethod);
+        }
+        if (!methodMap.containsKey(methodID)) {
+            methodMap.put(methodID, dvmMethod);
+        }
+    }
 }

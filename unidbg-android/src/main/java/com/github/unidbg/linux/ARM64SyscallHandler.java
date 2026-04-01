@@ -386,11 +386,21 @@ public class ARM64SyscallHandler extends AndroidSyscallHandler {
                 case 278:
                     backend.reg_write(Arm64Const.UC_ARM64_REG_X0, gerrandom(emulator));
                     return;
+                case 270:
+                    backend.reg_write(Arm64Const.UC_ARM64_REG_X0, process_vm_readv(emulator));
+                    return;
                 case 79:
                     backend.reg_write(Arm64Const.UC_ARM64_REG_X0, fstatat64(emulator));
                     return;
                 case 48:
                     backend.reg_write(Arm64Const.UC_ARM64_REG_X0, faccessat(emulator));
+                    return;
+                case 0x14d: // 333: io_pgetevents - 异步 I/O 事件获取
+                    syscall = "io_pgetevents";
+                    if (log.isDebugEnabled()) {
+                        log.debug("io_pgetevents: 返回 0 (无事件)");
+                    }
+                    backend.reg_write(Arm64Const.UC_ARM64_REG_X0, 0);
                     return;
             }
         } catch (StopEmulatorException e) {
@@ -1087,19 +1097,19 @@ public class ARM64SyscallHandler extends AndroidSyscallHandler {
         sysName.setString(0, "Linux"); /* Operating system name (e.g., "Linux") */
 
         Pointer nodeName = sysName.share(SYS_NMLN);
-        nodeName.setString(0, "localhost"); /* Name within "some implementation-defined network" */
+        nodeName.setString(0, "android");
 
         Pointer release = nodeName.share(SYS_NMLN);
-        release.setString(0, "1.0.0-unidbg"); /* Operating system release (e.g., "2.6.28") */
+        release.setString(0, "5.4.210-qgki-g991c3066d5a8");
 
         Pointer version = release.share(SYS_NMLN);
-        version.setString(0, "#1 SMP PREEMPT Thu Apr 19 14:36:58 CST 2018"); /* Operating system version */
+        version.setString(0, "#1 SMP PREEMPT Mon Jun 10 15:32:28 CST 2024");
 
         Pointer machine = version.share(SYS_NMLN);
-        machine.setString(0, "armv8l"); /* Hardware identifier */
+        machine.setString(0, "aarch64"); /* Hardware identifier */
 
         Pointer domainName = machine.share(SYS_NMLN);
-        domainName.setString(0, "localdomain"); /* NIS or YP domain name */
+        domainName.setString(0, "(none)");
 
         return 0;
     }
@@ -1114,15 +1124,60 @@ public class ARM64SyscallHandler extends AndroidSyscallHandler {
     private void exit_group(Emulator<?> emulator) {
         RegisterContext context = emulator.getContext();
         int status = context.getIntArg(0);
+        long lr = emulator.getBackend().reg_read(unicorn.Arm64Const.UC_ARM64_REG_LR).longValue();
+
         if (log.isDebugEnabled()) {
             log.debug("exit with code: {}", status, new Exception("exit_group status=" + status));
         } else {
             System.out.println("exit with code: " + status);
         }
+
+        // 如果 LR 在 SO 库范围内，跳过 exit 并返回到调用者
+        for (com.github.unidbg.Module module : emulator.getMemory().getLoadedModules()) {
+            if (lr >= module.base && lr < module.base + module.size) {
+                long offset = lr - module.base;
+                // 跳过exit, 继续执行
+                log.info("[unidbg] exit(" + status + ")" + " Called from " + module.name + " offset=0x" + Long.toHexString(offset));
+                log.info("[unidbg] Skipping exit from anti-debug code, returning to LR");
+                return;
+            }
+        }
+
         if (LoggerFactory.getLogger(AbstractEmulator.class).isDebugEnabled()) {
             createBreaker(emulator).debug("exit_group status=" + status);
         }
         emulator.getBackend().emu_stop();
+    }
+
+    private long process_vm_readv(Emulator<?> emulator) {
+        RegisterContext context = emulator.getContext();
+        int pid = context.getIntArg(0);
+        Pointer local_iov = context.getPointerArg(1);
+        long liovcnt = context.getLongArg(2);
+        Pointer remote_iov = context.getPointerArg(3);
+        long riovcnt = context.getLongArg(4);
+        long flags = context.getLongArg(5);
+
+        if (log.isDebugEnabled()) {
+            log.debug("process_vm_readv pid={}, local_iov={}, liovcnt={}, remote_iov={}, riovcnt={}, flags={}", pid, local_iov, liovcnt, remote_iov, riovcnt, flags);
+        }
+
+        if (liovcnt == 1 && riovcnt == 1) {
+            Pointer l_iov = local_iov;
+            Pointer l_base = l_iov.getPointer(0);
+            long l_len = l_iov.getLong(8);
+
+            Pointer r_iov = remote_iov;
+            Pointer r_base = r_iov.getPointer(0);
+            long r_len = r_iov.getLong(8);
+
+            long len = Math.min(l_len, r_len);
+            byte[] data = r_base.getByteArray(0, (int) len);
+            l_base.write(0, data, 0, (int) len);
+            return len;
+        }
+
+        return 0;
     }
 
     private int munmap(Backend backend, Emulator<?> emulator) {
@@ -1213,6 +1268,7 @@ public class ARM64SyscallHandler extends AndroidSyscallHandler {
 
     private static final int CLOCK_REALTIME = 0;
     private static final int CLOCK_MONOTONIC = 1;
+    private static final int CLOCK_PROCESS_CPUTIME_ID = 2;
     private static final int CLOCK_THREAD_CPUTIME_ID = 3;
     private static final int CLOCK_MONOTONIC_RAW = 4;
     private static final int CLOCK_MONOTONIC_COARSE = 6;
@@ -1224,7 +1280,15 @@ public class ARM64SyscallHandler extends AndroidSyscallHandler {
         RegisterContext context = emulator.getContext();
         int clk_id = context.getIntArg(0) & 0x7;
         Pointer tp = context.getPointerArg(1);
-        long offset = clk_id == CLOCK_REALTIME ? currentTimeMillis() * 1000000L : System.nanoTime() - nanoTime;
+
+        long currentTime = currentTimeMillis();
+        log.info("[随机点] clock_gettime 获取当前时间戳: {}, 可在此处固定为固定时间戳!", currentTime);
+        long nanoTime_new = System.nanoTime();
+        log.info("[随机点] clock_gettime 获取系统开机时间: {}, 可在此处固定为固定时间!", nanoTime_new);
+
+        long offset = clk_id == CLOCK_REALTIME ? currentTime * 1000000L : nanoTime_new - nanoTime;
+        log.info("[随机点] clock_gettime 获取系统开机时间 偏移: {}, 可在此处固定为固定时间偏移(前面固定后这里就没事了)!", offset);
+
         long tv_sec = offset / 1000000000L;
         long tv_nsec = offset % 1000000000L;
         if (log.isDebugEnabled()) {
@@ -1233,12 +1297,20 @@ public class ARM64SyscallHandler extends AndroidSyscallHandler {
         switch (clk_id) {
             case CLOCK_REALTIME:
             case CLOCK_MONOTONIC:
-            case CLOCK_THREAD_CPUTIME_ID:
             case CLOCK_MONOTONIC_RAW:
             case CLOCK_MONOTONIC_COARSE:
             case CLOCK_BOOTTIME:
                 tp.setLong(0, tv_sec);
                 tp.setLong(8, tv_nsec);
+                return 0;
+            case CLOCK_THREAD_CPUTIME_ID:
+                tp.setLong(0, 0);
+                tp.setLong(8, 1);
+                return 0;
+            case CLOCK_PROCESS_CPUTIME_ID: // 2
+                tp.setLong(0, tv_sec);
+                tp.setLong(8, tv_nsec);
+                log.warn("click_id=2, you should check normal and code");
                 return 0;
         }
         if (log.isDebugEnabled()) {

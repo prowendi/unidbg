@@ -84,7 +84,7 @@ public class DalvikVM64 extends BaseVM implements VM {
             }
         });
 
-        Pointer _FromReflectedMethod = svcMemory.registerSvc(new Arm64Svc() {
+        Pointer _FromReflectedMethod = svcMemory.registerSvc(new Arm64Svc("FromReflectedMethod") {
             @Override
             public long handle(Emulator<?> emulator) {
                 throw new UnsupportedOperationException();
@@ -2854,10 +2854,14 @@ public class DalvikVM64 extends BaseVM implements VM {
             }
         });
 
-        Pointer _GetCharArrayElements = svcMemory.registerSvc(new Arm64Svc() {
+        Pointer _GetCharArrayElements = svcMemory.registerSvc(new Arm64Svc("GetCharArrayElements") {
             @Override
             public long handle(Emulator<?> emulator) {
-                throw new UnsupportedOperationException();
+                RegisterContext context = emulator.getContext();
+                UnidbgPointer object = context.getPointerArg(1);
+                Pointer isCopy = context.getPointerArg(2);
+                CharArray array = getObject(object.toIntPeer());
+                return Objects.requireNonNull(array)._GetArrayCritical(emulator, isCopy).peer;
             }
         });
 
@@ -3098,10 +3102,16 @@ public class DalvikVM64 extends BaseVM implements VM {
             }
         });
 
-        Pointer _ReleaseCharArrayElements = svcMemory.registerSvc(new Arm64Svc() {
+        Pointer _ReleaseCharArrayElements = svcMemory.registerSvc(new Arm64Svc("ReleaseCharArrayElements") {
             @Override
             public long handle(Emulator<?> emulator) {
-                throw new UnsupportedOperationException();
+                RegisterContext context = emulator.getContext();
+                UnidbgPointer object = context.getPointerArg(1);
+                Pointer pointer = context.getPointerArg(2);
+                int mode = context.getIntArg(3);
+                CharArray array = getObject(object.toIntPeer());
+                Objects.requireNonNull(array)._ReleaseArrayCritical(pointer, mode);
+                return 0;
             }
         });
 

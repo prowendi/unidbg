@@ -97,6 +97,14 @@ public class DvmObject<T> extends Hashable {
         }
     }
 
+    public float callJniMethodFloat(Emulator<?> emulator, String method, Object...args) {
+        try {
+            return callJniMethod(emulator, vm, objectType, this, method, args).floatValue();
+        } finally {
+            vm.deleteLocalRefs();
+        }
+    }
+
     protected static Number callJniMethod(Emulator<?> emulator, VM vm, DvmClass objectType, DvmObject<?> thisObj, String method, Object...args) {
         UnidbgPointer fnPtr = objectType.findNativeFunction(emulator, method);
         vm.addLocalObject(thisObj);

@@ -32,6 +32,16 @@ public final class RegAccessPrinter {
                 Integer regIdBoxed = unicornRegIds.get(reg);
                 int regId = regIdBoxed != null ? regIdBoxed : 0;
                 if (regId != 0 && regId != ArmConst.UC_ARM_REG_CPSR && regId != Arm64Const.UC_ARM64_REG_NZCV) {
+                    // Prevent JVM crash: JNI reading >64 bits into a 64-bit Number pointer causes memory corruption
+                    // if ((regId >= Arm64Const.UC_ARM64_REG_Q0 && regId <= Arm64Const.UC_ARM64_REG_Q31) ||
+                    //     (regId >= Arm64Const.UC_ARM64_REG_V0 && regId <= Arm64Const.UC_ARM64_REG_V31) ||
+                    //     (regId >= Arm64Const.UC_ARM64_REG_D0 && regId <= Arm64Const.UC_ARM64_REG_D31) ||
+                    //     (regId >= Arm64Const.UC_ARM64_REG_S0 && regId <= Arm64Const.UC_ARM64_REG_S31) ||
+                    //     (regId >= ArmConst.UC_ARM_REG_Q0 && regId <= ArmConst.UC_ARM_REG_Q15) ||
+                    //     (regId >= ArmConst.UC_ARM_REG_D0 && regId <= ArmConst.UC_ARM_REG_D31) ||
+                    //     (regId >= ArmConst.UC_ARM_REG_S0 && regId <= ArmConst.UC_ARM_REG_S31)) {
+                    //     continue;
+                    // }
                     try {
                         long val = backend.reg_read(regId).longValue();
                         oldValues.put(regId, val);

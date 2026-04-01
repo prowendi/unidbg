@@ -1604,19 +1604,19 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
         sysname.setString(0, "Linux");
 
         Pointer nodename = sysname.share(SYS_NMLN);
-        nodename.setString(0, "localhost");
+        nodename.setString(0, "android");
 
         Pointer release = nodename.share(SYS_NMLN);
-        release.setString(0, "1.0.0-unidbg");
+        release.setString(0, "5.4.210-qgki-g991c3066d5a8");
 
         Pointer version = release.share(SYS_NMLN);
-        version.setString(0, "#1 SMP PREEMPT Thu Apr 19 14:36:58 CST 2018");
+        version.setString(0, "#1 SMP PREEMPT Mon Jun 10 15:32:28 CST 2024");
 
         Pointer machine = version.share(SYS_NMLN);
         machine.setString(0, "armv7l");
 
         Pointer domainname = machine.share(SYS_NMLN);
-        domainname.setString(0, "localdomain");
+        domainname.setString(0, "(none)");
 
         return 0;
     }
@@ -1624,11 +1624,25 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
     private void exit_group(Emulator<?> emulator) {
         RegisterContext context = emulator.getContext();
         int status = context.getIntArg(0);
+        long lr = emulator.getBackend().reg_read(unicorn.ArmConst.UC_ARM_REG_LR).intValue() & 0xffffffffL;
+
         if (log.isDebugEnabled()) {
             log.debug("exit with code: {}", status, new Exception("exit_group status=" + status));
         } else {
             System.out.println("exit with code: " + status);
         }
+
+        // 如果 LR 在 SO 库范围内，跳过 exit 并返回到调用者
+        for (com.github.unidbg.Module module : emulator.getMemory().getLoadedModules()) {
+            if (lr >= module.base && lr < module.base + module.size) {
+                long offset = lr - module.base;
+                // 跳过exit, 继续执行
+                log.info("[unidbg] exit(" + status + ")" + " Called from " + module.name + " offset=0x" + Long.toHexString(offset));
+                log.info("[unidbg] Skipping exit from anti-debug code, returning to LR");
+                return;
+            }
+        }
+
         if (LoggerFactory.getLogger(AbstractEmulator.class).isDebugEnabled()) {
             createBreaker(emulator).debug("exit_group status=" + status);
         }
@@ -1717,7 +1731,15 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
     protected int clock_gettime(Backend backend, Emulator<?> emulator) {
         int clk_id = backend.reg_read(ArmConst.UC_ARM_REG_R0).intValue();
         Pointer tp = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
-        long offset = clk_id == CLOCK_REALTIME ? System.currentTimeMillis() * 1000000L : System.nanoTime() - nanoTime;
+
+        long currentTime = System.currentTimeMillis();
+        log.info("[随机点] clock_gettime 获取当前时间戳: {}, 可在此处固定为固定时间戳!", currentTime);
+        long nanoTime_new = System.nanoTime();
+        log.info("[随机点] clock_gettime 获取系统开机时间: {}, 可在此处固定为固定时间!", nanoTime_new);
+
+        long offset = clk_id == CLOCK_REALTIME ? currentTime * 1000000L : nanoTime_new - nanoTime;
+        log.info("[随机点] clock_gettime 获取系统开机时间 偏移: {}, 可在此处固定为固定时间偏移(前面固定后这里就没事了)!", offset);
+
         long tv_sec = offset / 1000000000L;
         long tv_nsec = offset % 1000000000L;
         if (log.isDebugEnabled()) {
@@ -1735,6 +1757,11 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
             case CLOCK_THREAD_CPUTIME_ID:
                 tp.setInt(0, 0);
                 tp.setInt(4, 1);
+                return 0;
+            case 2: // CLOCK_PROCESS_CPUTIME_ID
+                tp.setInt(0, (int) tv_sec);
+                tp.setInt(4, (int) tv_nsec);
+                log.warn("click_id=2, you should check normal and code");
                 return 0;
         }
         throw new UnsupportedOperationException("clk_id=" + clk_id);

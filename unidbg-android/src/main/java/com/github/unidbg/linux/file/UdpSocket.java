@@ -187,10 +187,38 @@ public class UdpSocket extends SocketIO implements FileIO {
         if (request == SIOCGIFNAME) {
             return getIFaceName(emulator, argp);
         }
-
+        if (request == SIOCGIFADDR) {
+            return getIFaceAddr(emulator, argp);
+        }
         return super.ioctl(emulator, request, argp);
     }
-
+    private int getIFaceAddr(Emulator<?> emulator, long argp) {
+        IFReq req = IFReq.createIFReq(emulator, UnidbgPointer.pointer(emulator, argp));
+        req.unpack();
+        String ifName = new String(req.ifrn_name).trim();
+        if (log.isDebugEnabled()) {
+            log.debug("get iface addr: {}", ifName);
+        }
+        try {
+            for (NetworkIF networkIF : getNetworkIFs(emulator)) {
+                if (ifName.equals(networkIF.ifName)) {
+                    SockAddr sockAddr = new SockAddr(req.getAddrPointer());
+                    sockAddr.sin_family = AF_INET;
+                    sockAddr.sin_port = 0;
+                    sockAddr.sin_addr = Arrays.copyOf(networkIF.ipv4.getAddress(), IPV4_ADDR_LEN - 4);
+                    sockAddr.pack();
+                    return 0;
+                }
+            }
+        } catch (SocketException e) {
+            throw new IllegalStateException(e);
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("getIFaceAddr not found: {}", ifName);
+        }
+        emulator.getMemory().setErrno(19); // ENODEV
+        return -1;
+    }
     private int getIFaceList(Emulator<?> emulator, long argp) {
         try {
             List<NetworkIF> list = getNetworkIFs(emulator);

@@ -12,6 +12,20 @@ public interface FileIO {
     int SEEK_CUR = 1;
     int SEEK_END = 2;
 
+    /**
+     * 检查是否可读（用于 ppoll 等系统调用）
+     */
+    default boolean canRead() {
+        return true;
+    }
+
+    /**
+     * 检查是否可写（用于 ppoll 等系统调用）
+     */
+    default boolean canWrite() {
+        return true;
+    }
+
     void close();
 
     int write(byte[] data);
