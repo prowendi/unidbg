@@ -34,6 +34,8 @@ public class AssemblyCodeTextDumper implements CodeHook, TraceHook {
 
     private final Emulator<?> emulator;
     private final long traceBegin, traceEnd;
+    private final Module[] traceModules;
+    private final String[] traceModuleNames;
     private final TraceCodeListener listener;
 
     private final List<UnHook> unHooks = new ArrayList<>();
@@ -171,42 +173,12 @@ public class AssemblyCodeTextDumper implements CodeHook, TraceHook {
                 this.regWrite = new short[0];
             }
 
-            boolean isVec = false;
-            int bReg = -1;
-            long off = 0;
-            int mmSize = 0;
-            String mmType = null;
-
-            if (!emulator.is32Bit()) {
-                if (mnemonic != null && (mnemonic.startsWith("st") || mnemonic.startsWith("ld"))) {
-                    if (opStr != null && (opStr.contains("q") || opStr.contains("v") || opStr.contains("d"))) {
-                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[([a-z0-9]+)(?:,\\s*#(-?0x[0-9a-fA-F]+|-?\\d+))?\\]").matcher(opStr);
-                        if (m.find()) {
-                            isVec = true;
-                            String baseRegName = m.group(1);
-                            String offsetStr = m.group(2);
-                            for (int r = unicorn.Arm64Const.UC_ARM64_REG_X0; r <= unicorn.Arm64Const.UC_ARM64_REG_X28; r++) {
-                                if (baseRegName.equalsIgnoreCase(ins.regName(r))) { bReg = r; break; }
-                            }
-                            if (baseRegName.equalsIgnoreCase("sp")) bReg = unicorn.Arm64Const.UC_ARM64_REG_SP;
-                            if (baseRegName.equalsIgnoreCase("fp")) bReg = unicorn.Arm64Const.UC_ARM64_REG_FP;
-                            if (baseRegName.equalsIgnoreCase("lr")) bReg = unicorn.Arm64Const.UC_ARM64_REG_LR;
-                            if (offsetStr != null) {
-                                if (offsetStr.startsWith("-0x")) off = -Long.parseLong(offsetStr.substring(3), 16);
-                                else if (offsetStr.startsWith("0x")) off = Long.parseLong(offsetStr.substring(2), 16);
-                                else off = Long.parseLong(offsetStr);
-                            }
-                            mmSize = (mnemonic.startsWith("stp") || mnemonic.startsWith("ldp")) ? 32 : 16;
-                            mmType = mnemonic.startsWith("st") ? "w" : "r";
-                        }
-                    }
-                }
-            }
-            this.isVectorLoadStore = isVec;
-            this.baseReg = bReg;
-            this.offset = off;
-            this.manualMemDumpSize = mmSize;
-            this.manualMemDumpType = mmType;
+            // Removed manual vector size calculation (relying on raw Unicorn hook `w 8` chunks)
+            this.isVectorLoadStore = false;
+            this.baseReg = -1;
+            this.offset = 0;
+            this.manualMemDumpSize = 0;
+            this.manualMemDumpType = null;
         }
     }
 
@@ -247,10 +219,20 @@ public class AssemblyCodeTextDumper implements CodeHook, TraceHook {
     private boolean traceStopped = false;
 
     public AssemblyCodeTextDumper(Emulator<?> emulator, long begin, long end, PrintStream redirect, TraceCodeListener listener) {
+        this(emulator, begin, end, null, redirect, listener);
+    }
+
+    public AssemblyCodeTextDumper(Emulator<?> emulator, long begin, long end, String[] moduleNames, PrintStream redirect, TraceCodeListener listener) {
         this.startTime = System.currentTimeMillis();
         this.emulator = emulator;
         this.traceBegin = begin;
         this.traceEnd = end;
+        this.traceModuleNames = moduleNames;
+        if (moduleNames != null) {
+            this.traceModules = new Module[moduleNames.length];
+        } else {
+            this.traceModules = null;
+        }
         this.redirect = redirect;
         this.listener = listener;
 
@@ -348,6 +330,19 @@ public class AssemblyCodeTextDumper implements CodeHook, TraceHook {
     }
 
     private boolean canTrace(long address) {
+        if (traceModules != null) {
+            for (int i = 0; i < traceModules.length; i++) {
+                Module m = traceModules[i];
+                if (m == null && traceModuleNames != null && traceModuleNames[i] != null) {
+                    m = emulator.getMemory().findModule(traceModuleNames[i]);
+                    if (m != null) {
+                        traceModules[i] = m;
+                    }
+                }
+                if (m != null && address >= m.base && address < m.base + m.size) return true;
+            }
+            return false;
+        }
         return (traceBegin > traceEnd || (address >= traceBegin && address <= traceEnd));
     }
 
@@ -375,6 +370,7 @@ public class AssemblyCodeTextDumper implements CodeHook, TraceHook {
                     this.linesInBlock++;
                 } catch (Exception ignored) {}
                 this.manualMemDumpAddress = 0;
+                this.pendingMemoryDumps.clear(); // Suppress scattered Unicorn hook dumps
             }
 
             for (String dump : pendingMemoryDumps) {
@@ -447,6 +443,7 @@ public class AssemblyCodeTextDumper implements CodeHook, TraceHook {
                             } catch (Exception ignored) {}
                         }
                         this.manualMemDumpAddress = 0;
+                        this.pendingMemoryDumps.clear(); // Suppress scattered Unicorn hook dumps
                     }
 
                     for (String dump : this.pendingMemoryDumps) {

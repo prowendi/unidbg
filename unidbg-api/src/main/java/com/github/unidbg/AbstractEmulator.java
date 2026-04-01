@@ -95,6 +95,7 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
         String name = ManagementFactory.getRuntimeMXBean().getName();
         String pid = name.split("@")[0];
         this.pid = Integer.parseInt(pid) & 0x7fff;
+        log.info("[随机点] 这里的pid随机，为{}", pid);
 
         this.svcMemory = new ARMSvcMemory(svcBase, svcSize, this);
         this.threadDispatcher = createThreadDispatcher();
@@ -534,11 +535,6 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
     }
 
     @Override
-    public final TraceHook traceCodeText(String redirectFile) {
-        return traceCodeText(1, 0, redirectFile);
-    }
-
-    @Override
     public final TraceHook traceCodeText(long begin, long end, String redirectFile) {
         try {
             java.io.File f = new java.io.File(redirectFile);
@@ -585,6 +581,64 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
         backend.hook_add_new(readHook, 1, 0, this);
         backend.hook_add_new(writeHook, 1, 0, this);
         backend.hook_add_new((CodeHook) hook, begin, end, this);
+        
+        return hook;
+    }
+
+
+
+    @Override
+    public final TraceHook traceCodeText(String[] moduleNames) {
+        return traceCodeText(moduleNames, (java.io.PrintStream) null);
+    }
+
+    @Override
+    public final TraceHook traceCodeText(String[] moduleNames, String redirectFile) {
+        try {
+            java.io.File f = new java.io.File(redirectFile);
+            if (f.exists()) {
+                f.delete();
+            }
+            return traceCodeText(moduleNames, new java.io.PrintStream(f));
+        } catch (java.io.FileNotFoundException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Override
+    public final TraceHook traceCodeText(String[] moduleNames, java.io.PrintStream redirect) {
+        return traceCodeText(moduleNames, redirect, null);
+    }
+
+    @Override
+    public TraceHook traceCodeText(String[] moduleNames, java.io.PrintStream redirect, TraceCodeListener listener) {
+        final AssemblyCodeTextDumper hook = new AssemblyCodeTextDumper(this, 1, 0, moduleNames, redirect, listener);
+        
+        ReadHook readHook = new ReadHook() {
+            @Override
+            public void hook(Backend backend, long address, int size, Object user) {
+                hook.onMemoryRead(backend, address, size);
+            }
+            @Override
+            public void onAttach(UnHook unHook) { hook.addUnHook(unHook); }
+            @Override
+            public void detach() {}
+        };
+        
+        WriteHook writeHook = new WriteHook() {
+            @Override
+            public void hook(Backend backend, long address, int size, long value, Object user) {
+                hook.onMemoryWrite(backend, address, size, value);
+            }
+            @Override
+            public void onAttach(UnHook unHook) { hook.addUnHook(unHook); }
+            @Override
+            public void detach() {}
+        };
+        
+        backend.hook_add_new(readHook, 1, 0, this);
+        backend.hook_add_new(writeHook, 1, 0, this);
+        backend.hook_add_new((CodeHook) hook, 1, 0, this);
         
         return hook;
     }

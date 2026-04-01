@@ -63,15 +63,18 @@ public interface Emulator<T extends NewFileIO> extends Closeable, ArmDisassemble
     TraceHook traceCode(long begin, long end);
     TraceHook traceCode(long begin, long end, TraceCodeListener listener);
     /**
-     * trace instruction but detail
-     * note: low performance
+     * 极速并且还详尽的trace，用于算法分析再合适不过了~ 相比原版几十-上百倍的速度提升
      */
     TraceHook traceCodeText();
     TraceHook traceCodeText(long begin, long end);
-    TraceHook traceCodeText(String redirectFile);
     TraceHook traceCodeText(long begin, long end, String redirectFile);
     TraceHook traceCodeText(long begin, long end, java.io.PrintStream redirect);
     TraceHook traceCodeText(long begin, long end, java.io.PrintStream redirect, TraceCodeListener listener);
+    // 这里可以传入模块的名字来追踪多个模块，哪怕没有加载也可以传入哦，内部会自动处理(会损失一定效率，不过无所谓啦）
+    TraceHook traceCodeText(String[] moduleNames);
+    TraceHook traceCodeText(String[] moduleNames, String redirectFile);
+    TraceHook traceCodeText(String[] moduleNames, java.io.PrintStream redirect);
+    TraceHook traceCodeText(String[] moduleNames, java.io.PrintStream redirect, TraceCodeListener listener);
 
     Number eFunc(long begin, Number... arguments);
 
