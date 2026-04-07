@@ -84,10 +84,19 @@ public class DalvikVM64 extends BaseVM implements VM {
             }
         });
 
-        Pointer _FromReflectedMethod = svcMemory.registerSvc(new Arm64Svc("FromReflectedMethod") {
+        // Pointer _FromReflectedMethod = svcMemory.registerSvc(new Arm64Svc("FromReflectedMethod") {
+        //     @Override
+        //     public long handle(Emulator<?> emulator) {
+        //         throw new UnsupportedOperationException();
+        //     }
+        // });
+        Pointer _FromReflectedMethod = svcMemory.registerSvc(new Arm64Svc() {
             @Override
             public long handle(Emulator<?> emulator) {
-                throw new UnsupportedOperationException();
+                RegisterContext context = emulator.getContext();
+                UnidbgPointer jmethodID = context.getPointerArg(1);
+                return jmethodID.toIntPeer();
+//                throw new UnsupportedOperationException();
             }
         });
 
