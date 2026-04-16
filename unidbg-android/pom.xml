@@ -11,6 +11,12 @@
 
     <artifactId>unidbg-android</artifactId>
     <name>unidbg-android</name>
+    <repositories>
+        <repository>
+            <id>google</id>
+            <url>https://dl.google.com/dl/android/maven2/</url>
+        </repository>
+    </repositories>
     <dependencies>
         <dependency>
             <groupId>com.github.zhkl0228</groupId>
@@ -28,6 +34,11 @@
             <groupId>net.dongliu</groupId>
             <artifactId>apk-parser</artifactId>
             <version>2.6.10</version>
+        </dependency>
+        <dependency>
+            <groupId>com.android.tools.build</groupId>
+            <artifactId>apksig</artifactId>
+            <version>8.11.1</version>
         </dependency>
         <dependency>
             <groupId>com.github.zhkl0228</groupId>
